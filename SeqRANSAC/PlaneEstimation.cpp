@@ -7,7 +7,7 @@
 
 #include "PlaneEstimation.h"
 
-/* Plane Estimation
+/* Optimal Plane Estimation
  * Goal: Fit plane to the given spatial points
  * Plane is given in implicit form: Ax + By + Cz + D=0 
  * 
@@ -22,82 +22,55 @@
  * return[3]: D
  */
 
-float* EstimatePlaneImplicit(vector<Point3f> pts)
-{
-    int num=pts.size();
-    
-    Mat Cfs(num,4,CV_32F);   
-    
-    //Get points
-    for (int idx=0; idx<num; idx++)
-    {
-        Point3d pt=pts.at(idx);
-        Cfs.at<float>(idx,0)=pt.x;
-        Cfs.at<float>(idx,1)=pt.y;
-        Cfs.at<float>(idx,2)=pt.z;
-        Cfs.at<float>(idx,3)=1.0f;
-    }
-    
-    Mat mtx=Cfs.t()*Cfs;
-    Mat evals, evecs;
-
-    eigen(mtx, evals, evecs);   
-    
-    // normalize plane normal;
-    
-    float A=evecs.at<float>(3,0);
-    float B=evecs.at<float>(3,1);
-    float C=evecs.at<float>(3,2);
-    float D=evecs.at<float>(3,3);
-    
-    float norm=sqrt(A*A+B*B+C*C); // Plane parameters are normalized
-    
-    float* ret=new float[4];
-        
-    ret[0]=A/norm;
-    ret[1]=B/norm;
-    ret[2]=C/norm;
-    ret[3]=D/norm;
-
-    return ret;
-}
-
 float* EstimatePlaneOptimal(vector<Point3f> pts)
 {
     int num = pts.size();
 
-    Mat Cfs(num, 4, CV_32F);
+    // find center of gravity
+    Point3d t(0.0, 0.0, 0.0);
 
-    //Get points
+    for (int idx = 0; idx < num; idx++)
+    {
+        t.x += pts.at(idx).x;
+        t.y += pts.at(idx).y;
+        t.z += pts.at(idx).z;
+    }
+
+    t.x = t.x / num;
+    t.y = t.y / num;
+    t.z = t.z / num;
+
+    // X*l = 0 (homogenous equation)
+    Mat X(num, 3, CV_32F);
+
+    // get matrix X
     for (int idx = 0; idx < num; idx++)
     {
         Point3d pt = pts.at(idx);
-        Cfs.at<float>(idx, 0) = pt.x;
-        Cfs.at<float>(idx, 1) = pt.y;
-        Cfs.at<float>(idx, 2) = pt.z;
-        Cfs.at<float>(idx, 3) = 1.0f;
+        X.at<float>(idx, 0) = pt.x - t.x;
+        X.at<float>(idx, 1) = pt.y - t.y;
+        X.at<float>(idx, 2) = pt.z - t.z;
     }
 
-    Mat mtx = Cfs.t() * Cfs;
+    // normal vector l -> eigenvector of X^T X corresponding to the least eigenvalues
+
+    Mat mtx = X.t() * X;
     Mat evals, evecs;
 
     eigen(mtx, evals, evecs);
 
-    // normalize plane normal;
-
-    float A = evecs.at<float>(3, 0);
-    float B = evecs.at<float>(3, 1);
-    float C = evecs.at<float>(3, 2);
-    float D = evecs.at<float>(3, 3);
-
-    float norm = sqrt(A * A + B * B + C * C); // Plane parameters are normalized
+    float A = evecs.at<float>(2, 0);
+    float B = evecs.at<float>(2, 1);
+    float C = evecs.at<float>(2, 2);
 
     float* ret = new float[4];
 
-    ret[0] = A / norm;
-    ret[1] = B / norm;
-    ret[2] = C / norm;
-    ret[3] = D / norm;
+    // A, B, C are the normal vector to the plane
+    // D = Ax + By + Cz    
+    ret[0] = A;
+    ret[1] = B;
+    ret[2] = C;
+    ret[3] = -(A*t.x + B*t.y + C*t.z);    
 
     return ret;
 }
@@ -123,7 +96,7 @@ float* EstimatePlaneOptimal(vector<Point3f> pts)
  */
     
 
-float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
+float* EstimatePlaneRANSAC(vector<Point3f> pts, float threshold, int iterateNum)
 {
     int num=pts.size();
         
@@ -143,6 +116,7 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
         {
             rand2=(float)(rand())/RAND_MAX; index2=(int)(rand2*num);
         }
+
         int index3=(int)(rand3*num);
         while ((index3==index1)||(index3==index2)) 
         {
@@ -161,7 +135,7 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
         minimalSample.push_back(pt2);
         minimalSample.push_back(pt3);
             
-        float* samplePlane=EstimatePlaneImplicit(minimalSample);
+        float* samplePlane = EstimatePlaneOptimal(minimalSample);
             
         // printf("Plane params: %f %f %f %f \n",samplePlane[0],samplePlane[1],samplePlane[2],samplePlane[3]);
             
@@ -186,7 +160,7 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
             
     }// end for iter
     
-    // Finally, the plane is refitted from thew best consensus set
+    // Finally, the plane is refitted from the best consensus set
     RANSACDiffs bestResult=PlanePointRANSACDifferences(pts, bestPlane, threshold);   
     
     vector<Point3f> inlierPts;   
@@ -199,10 +173,9 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
         }
     }
     
-    float* finalPlane=EstimatePlaneImplicit(inlierPts);
+    float* finalPlane = EstimatePlaneOptimal(inlierPts);
 
     return finalPlane;
-
 }
     
 /* Plane-point differences
@@ -218,7 +191,6 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
  * Output:
  * RANSACDiffs 
  * see header file for details
- * 
  * 
  */   
     
@@ -237,7 +209,7 @@ RANSACDiffs PlanePointRANSACDifferences(vector<Point3f> pts, float* plane, float
     vector<float> distances;
         
     int inlierCounter=0;
-    for (int idx=0;idx<num;idx++)
+    for (int idx=0; idx<num; idx++)
     {
         Point3f pt=pts.at(idx);
         float diff=fabs(A*pt.x+B*pt.y+C*pt.z+D);
@@ -264,10 +236,8 @@ RANSACDiffs PlanePointRANSACDifferences(vector<Point3f> pts, float* plane, float
 // function that combined the other functions to find the differences
 RANSACDiffs findDifferences(vector<Point3f> points, float threshold, int iter)
 {
-
     // Estimate plane parameters without robustification
-
-    float* plane = EstimatePlaneImplicit(points);
+    float* plane = EstimatePlaneOptimal(points);
     printf("Plane fitting results for the whole data:\nA:%f B:%f C:%f D:%f\n", plane[0], plane[1], plane[2], plane[3]);
 
     delete[] plane;
