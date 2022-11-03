@@ -25,9 +25,9 @@
 float* EstimatePlaneImplicit(vector<Point3f> pts)
 {
     int num=pts.size();
-
+    
     Mat Cfs(num,4,CV_32F);   
-
+    
     //Get points
     for (int idx=0; idx<num; idx++)
     {
@@ -37,33 +37,32 @@ float* EstimatePlaneImplicit(vector<Point3f> pts)
         Cfs.at<float>(idx,2)=pt.z;
         Cfs.at<float>(idx,3)=1.0f;
     }
-
+    
     Mat mtx=Cfs.t()*Cfs;
     Mat evals, evecs;
 
     eigen(mtx, evals, evecs);   
-
+    
     // normalize plane normal;
-
+    
     float A=evecs.at<float>(3,0);
     float B=evecs.at<float>(3,1);
     float C=evecs.at<float>(3,2);
     float D=evecs.at<float>(3,3);
-
+    
     float norm=sqrt(A*A+B*B+C*C); // Plane parameters are normalized
-
+    
     float* ret=new float[4];
-
+        
     ret[0]=A/norm;
     ret[1]=B/norm;
     ret[2]=C/norm;
     ret[3]=D/norm;
 
     return ret;
-
 }
 
-
+    
 /* Plane Estimation
  * Goal: Fit plane to the given spatial points. The fitting is robust, RANSAC method is applied
  * Plane is given in implicit form: Ax + By + Cz + D=0 
@@ -82,21 +81,21 @@ float* EstimatePlaneImplicit(vector<Point3f> pts)
  * return[3]: D
  * 
  */
-
+    
 
 float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
 {
     int num=pts.size();
-
+        
     int bestSampleInlierNum=0;
     float bestPlane[4];
-
+        
     for(int iter=0; iter<iterateNum; iter++)
     {
         float rand1=(float)(rand())/RAND_MAX;
         float rand2=(float)(rand())/RAND_MAX;
         float rand3=(float)(rand())/RAND_MAX;                
-
+                
         // Generate three different(!) random numbers:
         int index1=(int)(rand1*num);
         int index2=(int)(rand2*num);
@@ -113,27 +112,27 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
         Point3f pt1=pts.at(index1);
         Point3f pt2=pts.at(index2);
         Point3f pt3=pts.at(index3);
-
+            
         // In each RANSAC cycle, a minimal sample with 3 points are formed
-
+            
         vector<Point3f> minimalSample;
-
+            
         minimalSample.push_back(pt1);
         minimalSample.push_back(pt2);
         minimalSample.push_back(pt3);
-
+            
         float* samplePlane=EstimatePlaneImplicit(minimalSample);
-
+            
         // printf("Plane params: %f %f %f %f \n",samplePlane[0],samplePlane[1],samplePlane[2],samplePlane[3]);
-
+            
         // Compute consensus set
-
+            
         RANSACDiffs sampleResult=PlanePointRANSACDifferences(pts, samplePlane, threshold);
-
+            
         // printf("NumInliers: %d \n",sampleResult.inliersNum);
-
+            
         // Check the new test is larger than the best one.
-
+            
         if (sampleResult.inliersNum>bestSampleInlierNum)
         {
             bestSampleInlierNum=sampleResult.inliersNum;
@@ -142,16 +141,16 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
             bestPlane[2]=samplePlane[2];
             bestPlane[3]=samplePlane[3];
         }// end if
-
+            
         delete[] samplePlane;
-
+            
     }// end for iter
-
+    
     // Finally, the plane is refitted from thew best consensus set
     RANSACDiffs bestResult=PlanePointRANSACDifferences(pts, bestPlane, threshold);   
-
+    
     vector<Point3f> inlierPts;   
-
+    
     for (int idx=0;idx<num;idx++)
     {
         if (bestResult.isInliers.at(idx))
@@ -159,13 +158,13 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
             inlierPts.push_back(pts.at(idx));
         }
     }
-
+    
     float* finalPlane=EstimatePlaneImplicit(inlierPts);
 
     return finalPlane;
 
 }
-
+    
 /* Plane-point differences
  * Goal: This method calculates the plane point differences, and determines if a point is an outlier.
  * Plane is given in implicit form: Ax + By + Cz + D=0 
@@ -182,21 +181,21 @@ float* EstimatePlaneRANSAC(vector<Point3f> pts,float threshold,int iterateNum)
  * 
  * 
  */   
-
+    
 RANSACDiffs PlanePointRANSACDifferences(vector<Point3f> pts, float* plane, float threshold)
 {
     int num=pts.size();
-
+        
     float A=plane[0];
     float B=plane[1];
     float C=plane[2];
     float D=plane[3];        
 
     RANSACDiffs ret;
-
+        
     vector<bool> isInliers;
     vector<float> distances;
-
+        
     int inlierCounter=0;
     for (int idx=0;idx<num;idx++)
     {
@@ -212,12 +211,39 @@ RANSACDiffs PlanePointRANSACDifferences(vector<Point3f> pts, float* plane, float
         {
             isInliers.push_back(false);
         }
-
+            
     }// end for idx;
-
+        
     ret.distances=distances;
     ret.isInliers=isInliers;
     ret.inliersNum=inlierCounter;
-
+        
     return ret;
+}
+
+RANSACDiffs findDifferences(vector<Point3f> points, float threshold, int iter)
+{
+
+    // Estimate plane parameters without robustification
+
+    float* plane = EstimatePlaneImplicit(points);
+    printf("Plane fitting results for the whole data:\nA:%f B:%f C:%f D:%f\n", plane[0], plane[1], plane[2], plane[3]);
+
+    delete[] plane;
+
+    // RANSAC-based robust estimation
+
+    float* planeParams = EstimatePlaneRANSAC(points, threshold, iter);
+
+    printf("Plane params RANSAC:\n A:%f B:%f C:%f D:%f \n", planeParams[0], planeParams[1], planeParams[2], planeParams[3]);
+
+    // Compute differences of the fitted plane in order to separate inliers from outliers
+
+    RANSACDiffs differences = PlanePointRANSACDifferences(points, planeParams, threshold);
+
+    delete[] planeParams;
+
+    // Inliers and outliers are coloured by green and red, respectively
+
+    return differences;
 }
